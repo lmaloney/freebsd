@@ -40,7 +40,7 @@ static char sccsid[] = "@(#)vmstat.c	8.1 (Berkeley) 6/6/93";
 #endif
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+__FBSDID("$FreeBSD: releng/9.1/usr.bin/vmstat/vmstat.c 234602 2012-04-23 12:18:38Z pluknet $");
 
 #include <sys/param.h>
 #include <sys/proc.h>
@@ -136,6 +136,8 @@ static int	hflag;
 
 static kvm_t   *kd;
 
+static int	YAMLflag;
+
 #define	FORKSTAT	0x01
 #define	INTRSTAT	0x02
 #define	MEMSTAT		0x04
@@ -181,7 +183,8 @@ main(int argc, char *argv[])
 	interval = reps = todo = 0;
 	maxshowdevs = 2;
 	hflag = isatty(1);
-	while ((c = getopt(argc, argv, "ac:fhHiM:mN:n:Pp:stw:z")) != -1) {
+        YAMLflag = 0;
+	while ((c = getopt(argc, argv, "ac:fhHiM:mN:n:Pp:stw:yz")) != -1) {
 		switch (c) {
 		case 'a':
 			aflag++;
@@ -239,6 +242,10 @@ main(int argc, char *argv[])
 			f = atof(optarg);
 			interval = f * 1000;
 			break;
+
+                case 'y': /* Enable YAML Emission */
+                        YAMLflag = 1;
+                        break;
 		case 'z':
 			todo |= ZMEMSTAT;
 			break;
@@ -469,7 +476,6 @@ fill_vmmeter(struct vmmeter *vmmp)
 			ADD_FROM_PCPU(i, v_intr);
 			ADD_FROM_PCPU(i, v_soft);
 			ADD_FROM_PCPU(i, v_vm_faults);
-			ADD_FROM_PCPU(i, v_io_faults);
 			ADD_FROM_PCPU(i, v_cow_faults);
 			ADD_FROM_PCPU(i, v_cow_optim);
 			ADD_FROM_PCPU(i, v_zfod);
@@ -508,7 +514,6 @@ fill_vmmeter(struct vmmeter *vmmp)
 
 		/* vm */
 		GET_VM_STATS(vm, v_vm_faults);
-		GET_VM_STATS(vm, v_io_faults);
 		GET_VM_STATS(vm, v_cow_faults);
 		GET_VM_STATS(vm, v_cow_optim);
 		GET_VM_STATS(vm, v_zfod);
@@ -970,7 +975,6 @@ dosum(void)
 	(void)printf("%9u zero fill pages prezeroed\n", sum.v_ozfod);
 	(void)printf("%9u intransit blocking page faults\n", sum.v_intrans);
 	(void)printf("%9u total VM faults taken\n", sum.v_vm_faults);
-	(void)printf("%9u page faults requiring I/O\n", sum.v_io_faults);
 	(void)printf("%9u pages affected by kernel thread creation\n", sum.v_kthreadpages);
 	(void)printf("%9u pages affected by  fork()\n", sum.v_forkpages);
 	(void)printf("%9u pages affected by vfork()\n", sum.v_vforkpages);
@@ -1281,9 +1285,11 @@ domemstat_zone(void)
 				    memstat_strerror(error));
 		}
 	}
-	printf("%-20s %6s %6s %8s %8s %8s %4s %4s\n\n", "ITEM", "SIZE",
+
+        if (YAMLflag == 0) {
+	  printf("%-20s %6s %6s %8s %8s %8s %4s %4s\n\n", "ITEM", "SIZE",
 	    "LIMIT", "USED", "FREE", "REQ", "FAIL", "SLEEP");
-	for (mtp = memstat_mtl_first(mtlp); mtp != NULL;
+	  for (mtp = memstat_mtl_first(mtlp); mtp != NULL;
 	    mtp = memstat_mtl_next(mtp)) {
 		strlcpy(name, memstat_get_name(mtp), MEMTYPE_MAXNAME);
 		strcat(name, ":");
@@ -1293,9 +1299,36 @@ domemstat_zone(void)
 		    memstat_get_count(mtp), memstat_get_free(mtp),
 		    memstat_get_numallocs(mtp), memstat_get_failures(mtp),
 		    memstat_get_sleeps(mtp));
-	}
+	   }
+           printf("\n");
+        }
+
+        if ( YAMLflag == 1 ) {
+          printf("#YAML Emmission: \n");
+          time_t timestamp;
+          time(&timestamp); 
+          printf("- date: %lu #TimeStamp of first Record\n",timestamp);
+          for (mtp = memstat_mtl_first(mtlp); mtp != NULL;
+            mtp = memstat_mtl_next(mtp)) {
+                strlcpy(name, memstat_get_name(mtp), MEMTYPE_MAXNAME);
+                strcat(name, ":");
+                printf("  %s \n    SIZE: %-6 " PRIu64 
+                       "\n    LIMIT: %-6" PRIu64 
+                       "\n    USED: %-8 " PRIu64 
+                       "\n    FREE: %-8" PRIu64 
+                       "\n    REQ: %-8" PRIu64 
+                       "\n    FAIL: %-4" PRIu64 
+                       "\n    SLEEP: %-4" PRIu64 " \n", 
+                 name,
+                 memstat_get_size(mtp), memstat_get_countlimit(mtp),
+                 memstat_get_count(mtp), memstat_get_free(mtp),
+                 memstat_get_numallocs(mtp), memstat_get_failures(mtp),
+                 memstat_get_sleeps(mtp));
+          }
+        }
 	memstat_mtl_free(mtlp);
-	printf("\n");
+        
+        
 }
 
 /*
@@ -1350,7 +1383,8 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr, "%s%s",
-		"usage: vmstat [-afHhimPsz] [-c count] [-M core [-N system]] [-w wait]\n",
+		"usage: vmstat [-afHhimPszy] [-c count] [-M core [-N system]] [-w wait]\n",
 		"              [-n devs] [-p type,if,pass] [disks]\n");
 	exit(1);
 }
+
